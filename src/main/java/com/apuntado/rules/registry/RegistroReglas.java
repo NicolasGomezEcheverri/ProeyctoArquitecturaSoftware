@@ -2,10 +2,10 @@ package com.apuntado.rules.registry;
 
 import com.apuntado.rules.api.IRegistroReglas;
 import com.apuntado.rules.api.ReglaJuego;
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.ServiceLoader;
-import java.util.Set;
 
 /**
  * Descubre las variantes con ServiceLoader (META-INF/services), por lo que
@@ -13,10 +13,15 @@ import java.util.Set;
  */
 public class RegistroReglas implements IRegistroReglas {
 
-    private final Map<String, ReglaJuego> reglas = new HashMap<>();
+    private final Map<String, ReglaJuego> reglas = new LinkedHashMap<>();
 
     public RegistroReglas() {
-        for (ReglaJuego regla : ServiceLoader.load(ReglaJuego.class)) {
+        this(ServiceLoader.load(ReglaJuego.class));
+    }
+
+    /** Permite registrar variantes a mano en las pruebas. */
+    public RegistroReglas(Iterable<ReglaJuego> variantes) {
+        for (ReglaJuego regla : variantes) {
             reglas.put(regla.modalidad(), regla);
         }
     }
@@ -31,7 +36,9 @@ public class RegistroReglas implements IRegistroReglas {
     }
 
     @Override
-    public Set<String> modalidadesDisponibles() {
-        return Set.copyOf(reglas.keySet());
+    public Map<String, String> modalidadesDisponibles() {
+        Map<String, String> modalidades = new LinkedHashMap<>();
+        reglas.forEach((clave, regla) -> modalidades.put(clave, regla.descripcion()));
+        return Collections.unmodifiableMap(modalidades);
     }
 }
