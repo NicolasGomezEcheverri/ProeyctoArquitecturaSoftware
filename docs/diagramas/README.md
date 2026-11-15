@@ -8,7 +8,7 @@
 | `1.3b-clases-reglas.*` | 1.3 Clases de implementación, vista 2: motor de reglas (Strategy + ServiceLoader) |
 | `1.3-clases-implementacion.*` | 1.3 Las dos vistas juntas en un solo diagrama (muy ancho; útil en SVG) |
 
-Las fuentes son PlantUML (`.puml`). Para regenerar las imágenes:
+Las fuentes son PlantUML (`.puml`). También están en draw.io (`.drawio`, con cada figura editable); `diagramas-entrega-3.drawio` trae los cuatro diagramas como páginas de un solo archivo. Para regenerar las imágenes:
 
 ```bash
 java -jar plantuml.jar -tpng -tsvg docs/diagramas/*.puml
