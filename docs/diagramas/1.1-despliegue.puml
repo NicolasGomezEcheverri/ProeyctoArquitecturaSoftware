@@ -1,0 +1,60 @@
+@startuml 1.1-despliegue
+' Entregable 3 - 1.1 Diagrama UML de despliegue (topologia fisica real del MVP)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam monochrome true
+skinparam nodesep 60
+skinparam ranksep 70
+left to right direction
+title Diagrama de despliegue — MVP Apuntado (docker compose / Render)
+
+node "Dispositivo del jugador\n(PC, portátil o celular)" <<device>> as DISP {
+  node "Navegador web\n(Chrome / Firefox / Edge / Safari)" <<executionEnvironment>> as NAV {
+    artifact "cliente web\n(index.html, app.js,\nestilos.css, metricas.html)" <<artifact>> as CLI
+  }
+}
+note bottom of DISP
+  2 a 4 instancias por partida (RN-02).
+  También puede ser varias pestañas
+  en un mismo equipo (simulación
+  multi-instancia).
+end note
+
+node "Servidor de aplicación\n(equipo anfitrión con Docker, o Render)" <<device>> as SRV {
+  node "Contenedor «app»\neclipse-temurin:17-jre" <<executionEnvironment>> as CAPP {
+    node "JVM 17 + Spring Boot 3.3\n(Tomcat embebido, puerto 8080)" <<executionEnvironment>> as JVM {
+      artifact "apuntado.jar" <<artifact>> as JAR
+      component "presentation" as PRES
+      component "session" as SES
+      component "gameplay «mediador»" as GP
+      component "rules · deck · scoring · history" as DOM
+    }
+  }
+  node "Contenedor «db»\npostgres:16-alpine" <<executionEnvironment>> as CDB {
+    database "BD apuntado\n(PostgreSQL 16)" as BD
+    artifact "migraciones Flyway\nV1__esquema_inicial.sql\nV2__auditoria_y_estado.sql" <<artifact>> as FLY
+  }
+  storage "volumen\ndatos-apuntado" as VOL
+}
+
+node "GitHub Actions\n(runner ubuntu-latest)" <<device>> as CI {
+  node "JDK 17 + Maven" <<executionEnvironment>> as MVN {
+    artifact "ci.yml\n(ArchUnit, Checkstyle,\nPMD, JaCoCo, Lizard)" <<artifact>> as PIPE
+  }
+  node "servicio postgres:16" <<executionEnvironment>> as CIPG
+}
+
+CLI -- PRES : HTTP/1.1 REST + JSON\n:8080 /api/salas, /api/partidas
+CLI -- PRES : WebSocket (ws/wss)\n:8080 /ws/juego · JSON
+JAR ..> GP : <<manifest>>\nmódulos del monolito
+PRES -- SES : llamada en memoria\n(IGestionPartida)
+PRES -- GP : llamada en memoria\n(IAccionesJugador, IConsultaPartida)
+SES -- GP : en memoria (IControlPartida)
+GP -- DOM : en memoria (ReglaJuego, IMazo,\nIPuntuacion, IHistorial)
+JVM -- BD : JDBC / TCP 5432\n(protocolo PostgreSQL, HikariCP)
+FLY ..> BD : <<deploy>> al arrancar
+BD -- VOL
+MVN -- CIPG : JDBC 5432\n(prueba de humo)
+PIPE ..> JAR : <<build>> mvn verify
+@enduml

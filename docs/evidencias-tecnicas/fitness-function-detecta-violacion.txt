@@ -1,0 +1,10 @@
+[ERROR] Tests run: 14, Failures: 2, Errors: 0, Skipped: 0, Time elapsed: 2.801 s <<< FAILURE! -- in architecture.ArchitectureFitnessTest
+[ERROR] ArchitectureFitnessTest.clasica_no_depende_de_apuntado -- Time elapsed: 0.010 s <<< FAILURE!
+Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package 'com.apuntado.rules.clasica..' should depend on classes that reside in a package 'com.apuntado.rules.apuntado..'' was violated (2 times):
+	at com.tngtech.archunit.lang.ArchRule$Assertions.assertNoViolation(ArchRule.java:94)
+[ERROR] ArchitectureFitnessTest.variantes_solo_dependen_del_contrato -- Time elapsed: 0.001 s <<< FAILURE!
+Architecture Violation [Priority: MEDIUM] - Rule 'la variante clasica solo depende del contrato y de tipos compartidos and la variante apuntado solo depende del contrato y de tipos compartidos' was violated (2 times):
+	at com.tngtech.archunit.lang.ArchRule$Assertions.assertNoViolation(ArchRule.java:94)
+[ERROR]   Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package 'com.apuntado.rules.clasica..' should depend on classes that reside in a package 'com.apuntado.rules.apuntado..'' was violated (2 times):
+[ERROR]   Architecture Violation [Priority: MEDIUM] - Rule 'la variante clasica solo depende del contrato y de tipos compartidos and la variante apuntado solo depende del contrato y de tipos compartidos' was violated (2 times):
+[ERROR] Tests run: 14, Failures: 2, Errors: 0, Skipped: 0
