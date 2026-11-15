@@ -1,0 +1,25 @@
+# Blueprint para desplegar en Render (render.com): New > Blueprint > este repositorio.
+# Crea una base PostgreSQL gratuita y el servicio web con el Dockerfile del proyecto.
+databases:
+  - name: apuntado-db
+    plan: free
+    databaseName: apuntado
+    user: apuntado
+
+services:
+  - type: web
+    name: apuntado
+    runtime: docker
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: DATABASE_HOST
+        fromDatabase: { name: apuntado-db, property: host }
+      - key: DATABASE_PORT
+        fromDatabase: { name: apuntado-db, property: port }
+      - key: DATABASE_NAME
+        fromDatabase: { name: apuntado-db, property: database }
+      - key: DATABASE_USER
+        fromDatabase: { name: apuntado-db, property: user }
+      - key: DATABASE_PASSWORD
+        fromDatabase: { name: apuntado-db, property: password }

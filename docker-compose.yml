@@ -1,0 +1,32 @@
+# Levanta la base de datos y el servidor del juego con un solo comando:
+#   docker compose up --build
+# Luego abre http://localhost:8080 (o http://<ip-del-equipo>:8080 desde otro dispositivo de la red).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: apuntado
+      POSTGRES_USER: apuntado
+      POSTGRES_PASSWORD: apuntado
+    volumes:
+      - datos-apuntado:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U apuntado -d apuntado"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: jdbc:postgresql://db:5432/apuntado
+      DATABASE_USER: apuntado
+      DATABASE_PASSWORD: apuntado
+    ports:
+      - "8080:8080"
+
+volumes:
+  datos-apuntado:
