@@ -51,7 +51,7 @@ public class TurnOrchestrator implements IAccionesJugador {
             reconstruirSiHaceFalta(mesa, ronda);
             ronda.robarDelMazo(jugador.jugadorId());
             registrar(mesa, jugador, TipoEvento.ROBO_MAZO, "Roba del mazo");
-            return movimiento(mesa, accionId, jugador.nombre() + " robó del mazo");
+            return movimiento(mesa, accionId, jugador.nombre() + " robó del mazo", "ROBO_MAZO", jugador, null);
         });
     }
 
@@ -62,7 +62,8 @@ public class TurnOrchestrator implements IAccionesJugador {
             ronda.exigirTurno(jugador.jugadorId(), RondaEnJuego.Fase.ROBAR);
             Carta carta = ronda.tomarDelPozo(jugador.jugadorId());
             registrar(mesa, jugador, TipoEvento.ROBO_POZO, "Toma " + carta.texto() + " del pozo");
-            return movimiento(mesa, accionId, jugador.nombre() + " tomó el " + carta.texto() + " del pozo");
+            return movimiento(mesa, accionId, jugador.nombre() + " tomó el " + carta.texto() + " del pozo",
+                    "ROBO_POZO", jugador, carta);
         });
     }
 
@@ -75,7 +76,8 @@ public class TurnOrchestrator implements IAccionesJugador {
             registrar(mesa, jugador, TipoEvento.DESCARTE, "Descarta " + carta.texto());
             historial.registrarEvento(EventoJuego.de(mesa.partidaId(), ronda.numero(), ronda.rondaId(),
                     ronda.jugadorEnTurno(), TipoEvento.TURNO_INICIADO, null));
-            return movimiento(mesa, accionId, jugador.nombre() + " descartó el " + carta.texto());
+            return movimiento(mesa, accionId, jugador.nombre() + " descartó el " + carta.texto(), "DESCARTE",
+                    jugador, carta);
         });
     }
 
@@ -84,7 +86,8 @@ public class TurnOrchestrator implements IAccionesJugador {
         return ejecutar(credencial, accionId, (mesa, jugador) -> {
             ResultadoAccion resultado = cierre.procesar(mesa, jugador, descarte);
             if (resultado.aceptada()) {
-                mesa.registrarMovimiento(accionId, jugador.nombre() + " cerró la ronda " + mesa.ronda().numero());
+                mesa.registrarMovimiento(accionId, jugador.nombre() + " cerró la ronda " + mesa.ronda().numero(),
+                        "CIERRE", jugador.jugadorId(), descarte);
             }
             return resultado;
         });
@@ -165,8 +168,9 @@ public class TurnOrchestrator implements IAccionesJugador {
         });
     }
 
-    private ResultadoAccion movimiento(Mesa mesa, String accionId, String descripcion) {
-        mesa.registrarMovimiento(accionId, descripcion);
+    private ResultadoAccion movimiento(Mesa mesa, String accionId, String descripcion, String tipo,
+            Participante jugador, Carta cartaPublica) {
+        mesa.registrarMovimiento(accionId, descripcion, tipo, jugador.jugadorId(), cartaPublica);
         return ResultadoAccion.ok(descripcion);
     }
 

@@ -60,6 +60,33 @@ class ManosPrivadasWebSocketIT {
                 m.get("estado").get("jugadores").forEach(j -> assertThat(j.has("mano")).isFalse());
             }
         }
+
+        // Quien abre descarta y el otro roba del mazo: la carta robada no viaja en el estado publico
+        List<JsonNode> abre = ultimaMano(paraAna).get("cartas").size() == 11 ? paraAna : paraBeto;
+        List<JsonNode> sigue = abre == paraAna ? paraBeto : paraAna;
+        WebSocketSession sesionAbre = abre == paraAna ? sesiones.get(0) : sesiones.get(1);
+        WebSocketSession sesionSigue = abre == paraAna ? sesiones.get(1) : sesiones.get(0);
+        JsonNode carta = ultimaMano(abre).get("cartas").get(0);
+        sesionAbre.sendMessage(new TextMessage("{\"tipo\":\"DESCARTAR\",\"accionId\":\"d1\",\"carta\":" + carta + "}"));
+        esperarMovimiento(sigue, "DESCARTE");
+        sesionSigue.sendMessage(new TextMessage("{\"tipo\":\"ROBAR_MAZO\",\"accionId\":\"r1\"}"));
+        JsonNode robo = esperarMovimiento(abre, "ROBO_MAZO");
+        assertThat(robo.get("carta").isNull()).as("RN-01: la carta robada del mazo no se informa").isTrue();
+    }
+
+    private final List<WebSocketSession> sesiones = new CopyOnWriteArrayList<>();
+
+    private JsonNode esperarMovimiento(List<JsonNode> recibidos, String tipo) throws InterruptedException {
+        for (int i = 0; i < 50; i++) {
+            for (JsonNode m : recibidos) {
+                JsonNode mov = m.path("estado").path("movimiento");
+                if ("ESTADO".equals(m.get("tipo").asText()) && tipo.equals(mov.path("tipo").asText())) {
+                    return mov;
+                }
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("No llego el movimiento " + tipo);
     }
 
     private List<JsonNode> conectar(String codigo, Map<?, ?> ingreso) throws Exception {
@@ -73,6 +100,7 @@ class ManosPrivadasWebSocketIT {
             }
         }, null, uri).get(5, TimeUnit.SECONDS);
         assertThat(sesion.isOpen()).isTrue();
+        sesiones.add(sesion);
         return recibidos;
     }
 

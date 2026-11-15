@@ -1,8 +1,10 @@
 package com.apuntado.gameplay.internal;
 
+import com.apuntado.gameplay.api.Movimiento;
 import com.apuntado.gameplay.api.Participante;
 import com.apuntado.gameplay.api.ResumenCierre;
 import com.apuntado.rules.api.ReglaJuego;
+import com.apuntado.shared.Carta;
 import java.util.List;
 
 /** Partida en curso: configuracion, ronda actual y lo ultimo que paso en la mesa. */
@@ -23,6 +25,7 @@ final class Mesa {
     private long secuencia;
     private String ultimaAccionId;
     private String ultimoMovimiento = "";
+    private Movimiento movimiento;
 
     Mesa(int partidaId, String codigo, ReglaJuego regla, int umbral, List<Participante> participantes,
             int posicionAbridor) {
@@ -82,12 +85,13 @@ final class Mesa {
         return participantes.get(posicionAbridor).jugadorId();
     }
 
-    void registrarMovimiento(String accionId, String descripcion) {
+    /** Registra la jugada aceptada; {@code cartaPublica} va null si la carta no se puede mostrar. */
+    void registrarMovimiento(String accionId, String descripcion, String tipo, Integer jugadorId,
+            Carta cartaPublica) {
         secuencia++;
         ultimaAccionId = accionId;
-        if (descripcion != null) {
-            ultimoMovimiento = descripcion;
-        }
+        ultimoMovimiento = descripcion;
+        movimiento = new Movimiento(secuencia, tipo, jugadorId, cartaPublica);
     }
 
     int partidaId() {
@@ -136,5 +140,9 @@ final class Mesa {
 
     String ultimoMovimiento() {
         return ultimoMovimiento;
+    }
+
+    Movimiento movimiento() {
+        return movimiento;
     }
 }

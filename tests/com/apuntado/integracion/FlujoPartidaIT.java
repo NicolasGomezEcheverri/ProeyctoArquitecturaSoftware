@@ -72,6 +72,9 @@ class FlujoPartidaIT {
         assertThat(penalizacion(estado, mesa.otro().jugadorId())).isEqualTo(67);
         assertThat(penalizacion(estado, mesa.abridor().jugadorId())).isZero();
         assertThat(estado.topePozo()).isEqualTo(c("9T"));
+        assertThat(estado.movimiento().tipo()).isEqualTo("CIERRE");
+        assertThat(estado.movimiento().carta()).isEqualTo(c("9T"));
+        assertThat(estado.movimiento().jugadorId()).isEqualTo(mesa.abridor().jugadorId());
 
         int partidaId = partidaId(mesa.codigo());
         assertThat(jdbc.queryForObject("select count(*) from puntaje_acumulado p join ronda r on r.id = p.ronda_id "
@@ -85,6 +88,8 @@ class FlujoPartidaIT {
         EstadoPublico ronda2 = notificador.estado(mesa.codigo());
         assertThat(ronda2.ronda()).isEqualTo(2);
         assertThat(ronda2.turnoDe()).as("la siguiente ronda la abre el otro jugador").isEqualTo(mesa.otro().jugadorId());
+        assertThat(ronda2.abridorId()).isEqualTo(mesa.otro().jugadorId());
+        assertThat(ronda2.movimiento().tipo()).isEqualTo("RONDA_NUEVA");
         assertThat(notificador.mano(mesa.codigo(), mesa.otro().jugadorId())).hasSize(11);
     }
 

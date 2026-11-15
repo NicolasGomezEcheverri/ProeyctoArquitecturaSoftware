@@ -1,11 +1,14 @@
 // Cliente web del juego Apuntado. Sin frameworks: la logica de reglas vive en el
-// servidor; este archivo solo muestra el estado y envia las acciones del jugador.
+// servidor; este archivo dibuja la mesa, anima las jugadas y envia las acciones.
 "use strict";
 
 const PALOS = { PICAS: "♠", CORAZONES: "♥", DIAMANTES: "♦", TREBOLES: "♣" };
 const VALORES = ["AS", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE", "DIEZ", "J", "Q", "K"];
 const SIMBOLO_VALOR = { AS: "A", DOS: "2", TRES: "3", CUATRO: "4", CINCO: "5", SEIS: "6", SIETE: "7", OCHO: "8", NUEVE: "9", DIEZ: "10", J: "J", Q: "Q", K: "K" };
+const FIGURAS = new Set(["J", "Q", "K"]);
 const CLAVE_SESION = "apuntado.credencial";
+const SIN_MOVIMIENTO = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const DURACION = 320;
 
 const $ = (id) => document.getElementById(id);
 
@@ -14,10 +17,13 @@ const app = {
   ws: null,
   estado: null,       // ultimo EstadoPublico recibido
   mano: [],
-  elegida: null,      // indice de la carta elegida en la mano
+  elegida: null,      // clave de la carta elegida
   nuevas: new Set(),  // cartas recien robadas, para resaltarlas
   pendientes: new Map(), // accionId -> instante de envio, para medir latencia
   ultimoCierreVisto: null,
+  ultimaSecuencia: null, // secuencia del ultimo movimiento ya animado
+  vueloHaciaMano: null,  // { desde: DOMRect } para la carta que voy a recibir
+  repartiendo: false,
   sondeoSala: null,
 };
 
@@ -27,24 +33,40 @@ function aviso(texto, tipo = "") {
   div.className = "aviso " + tipo;
   div.textContent = texto;
   $("avisos").appendChild(div);
-  setTimeout(() => div.remove(), tipo === "error" ? 4500 : 2500);
+  setTimeout(() => { div.classList.add("saliendo"); setTimeout(() => div.remove(), 300); }, tipo === "error" ? 4200 : 2300);
 }
 
 function claveCarta(c) { return c.valor + "-" + c.palo; }
 function textoCarta(c) { return SIMBOLO_VALOR[c.valor] + PALOS[c.palo]; }
+function esRoja(c) { return c.palo === "CORAZONES" || c.palo === "DIAMANTES"; }
 
+/** Cara de una carta: indices en dos esquinas y un dibujo central (palo o figura). */
 function crearCarta(c, mini = false) {
   const el = document.createElement("span");
-  el.className = "carta" + (mini ? " mini" : "") + (c.palo === "CORAZONES" || c.palo === "DIAMANTES" ? " roja" : "");
-  el.innerHTML = `<span class="esquina">${SIMBOLO_VALOR[c.valor]}<small>${PALOS[c.palo]}</small></span>${PALOS[c.palo]}`;
+  el.className = "carta" + (mini ? " mini" : "") + (esRoja(c) ? " roja" : "");
+  const v = SIMBOLO_VALOR[c.valor];
+  const p = PALOS[c.palo];
+  const medio = FIGURAS.has(v) ? `<span class="medio figura">${v}<span>${p}</span></span>` : `<span class="medio">${p}</span>`;
+  el.innerHTML = `<span class="indice ti">${v}<small>${p}</small></span>${medio}<span class="indice bd">${v}<small>${p}</small></span>`;
   el.title = textoCarta(c);
+  el.dataset.clave = claveCarta(c);
   return el;
 }
 
-function grupoCartas(cartas, clase = "") {
+function crearDorso() {
+  const el = document.createElement("span");
+  el.className = "carta dorso";
+  return el;
+}
+
+function grupoCartas(cartas, clase = "", retrasoBase = 0) {
   const g = document.createElement("div");
   g.className = "grupo " + clase;
-  cartas.forEach((c) => g.appendChild(crearCarta(c, true)));
+  cartas.forEach((c, i) => {
+    const el = crearCarta(c, true);
+    el.style.animationDelay = (retrasoBase + i * 70) + "ms";
+    g.appendChild(el);
+  });
   return g;
 }
 
@@ -72,6 +94,45 @@ function mostrarVista(id) {
   ["vistaInicio", "vistaSala", "vistaMesa"].forEach((v) => $(v).classList.toggle("oculto", v !== id));
 }
 
+function escapar(texto) {
+  return String(texto).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+
+// ---------- animacion: una carta que vuela de un lugar a otro ----------
+/**
+ * Hace volar una carta (cara o dorso) desde un rectangulo de la pantalla hasta otro.
+ * Usa una copia flotante, asi el resto de la mesa se puede redibujar mientras tanto.
+ */
+function volar(desde, hasta, carta, { retraso = 0, duracion = DURACION, girar = 0 } = {}) {
+  if (SIN_MOVIMIENTO || !desde || !hasta) return Promise.resolve();
+  const el = carta ? crearCarta(carta) : crearDorso();
+  el.classList.add("volando");
+  Object.assign(el.style, { left: desde.left + "px", top: desde.top + "px", width: desde.width + "px", height: desde.height + "px" });
+  el.style.setProperty("--cw", desde.width + "px");
+  document.body.appendChild(el);
+  const escala = hasta.width / desde.width;
+  const anim = el.animate([
+    { transform: "translate(0, 0) scale(1) rotate(0deg)", opacity: 1 },
+    { transform: `translate(${hasta.left - desde.left}px, ${hasta.top - desde.top}px) scale(${escala}) rotate(${girar}deg)`, opacity: 1 },
+  ], { duration: duracion, delay: retraso, easing: "cubic-bezier(.2,.8,.2,1)", fill: "both" });
+  return anim.finished.catch(() => {}).then(() => el.remove());
+}
+
+function rectDe(el) { return el ? el.getBoundingClientRect() : null; }
+
+/** Caja con forma de carta (ancho x 1,4) centrada dentro de otra caja cualquiera. */
+function comoCarta(rect, ancho) {
+  if (!rect) return null;
+  const w = ancho || Math.min(rect.width, rect.height / 1.4);
+  const h = w * 1.4;
+  return { left: rect.left + (rect.width - w) / 2, top: rect.top + (rect.height - h) / 2, width: w, height: h };
+}
+
+function anchoMini() {
+  const d = document.querySelector(".asiento .dorsos .carta");
+  return d ? d.offsetWidth : 40;
+}
+
 // ---------- inicio ----------
 async function cargarModalidades() {
   const modalidades = await api("GET", "/api/modalidades");
@@ -84,6 +145,20 @@ async function cargarModalidades() {
     label.innerHTML = `<input type="radio" name="modalidad" value="${clave}" ${i === 0 ? "checked" : ""}>
       <span><b>${nombre}</b><small>${descripcion}</small></span>`;
     cont.appendChild(label);
+  });
+}
+
+function pintarPortada() {
+  const cont = document.querySelector(".abanico-portada");
+  const cartas = [{ valor: "AS", palo: "PICAS" }, { valor: "K", palo: "CORAZONES" }, { valor: "SIETE", palo: "DIAMANTES" },
+    { valor: "SIETE", palo: "TREBOLES" }, { valor: "SIETE", palo: "CORAZONES" }];
+  cartas.forEach((c, i) => {
+    const el = crearCarta(c);
+    const ang = (i - 2) * 9;
+    el.style.transform = `translateX(-50%) rotate(${ang}deg)`;
+    el.animate([{ transform: "translateX(-50%) rotate(0deg)", opacity: 0 }, { transform: `translateX(-50%) rotate(${ang}deg)`, opacity: 1 }],
+      { duration: SIN_MOVIMIENTO ? 1 : 500, delay: SIN_MOVIMIENTO ? 0 : i * 80, easing: "cubic-bezier(.2,.8,.2,1)", fill: "both" });
+    cont.appendChild(el);
   });
 }
 
@@ -130,7 +205,10 @@ async function revisarSala() {
     }
     const modalidad = sala.modalidad === "CLASICA" ? "Clásica" : "Apuntado";
     $("salaDetalle").textContent = `${modalidad} · hasta ${sala.umbral} puntos · ${sala.jugadores.length} de ${sala.cupo} jugadores`;
-    $("salaJugadores").innerHTML = sala.jugadores.map((n) => `<li>${escapar(n)}</li>`).join("");
+    const lista = $("salaJugadores");
+    if (lista.children.length !== sala.jugadores.length) {
+      lista.innerHTML = sala.jugadores.map((n) => `<li>${escapar(n)}</li>`).join("");
+    }
     const soyCreador = sala.creadorId === app.credencial.jugadorId;
     $("btnEmpezar").classList.toggle("oculto", !soyCreador || sala.jugadores.length < 2);
   } catch (err) {
@@ -154,9 +232,10 @@ $("btnCopiar").addEventListener("click", async () => {
   catch (e) { aviso(enlace); }
 });
 
-// ---------- mesa ----------
+// ---------- conexion ----------
 function entrarAMesa() {
   mostrarVista("vistaMesa");
+  $("menuPartida").classList.remove("oculto");
   conectar();
 }
 
@@ -166,6 +245,7 @@ function conectar() {
   const url = `${protocolo}://${location.host}/ws/juego?codigo=${c.codigo}&jugador=${c.jugadorId}&token=${c.token}`;
   const ws = new WebSocket(url);
   app.ws = ws;
+  app.ultimaSecuencia = null; // al (re)conectar no se anima lo que ya paso
   ws.onmessage = (ev) => recibir(JSON.parse(ev.data));
   ws.onclose = () => {
     if (app.ws === ws && app.credencial) {
@@ -192,19 +272,6 @@ function recibir(msg) {
   }
 }
 
-function recibirEstado(estado) {
-  medirLatencia(estado.ultimaAccionId);
-  app.estado = estado;
-  pintarMesa();
-  const cierre = estado.ultimoCierre;
-  const claveCierre = cierre ? cierre.ronda + "-" + estado.estado : null;
-  if (estado.estado !== "EN_RONDA" && cierre && claveCierre !== app.ultimoCierreVisto) {
-    app.ultimoCierreVisto = claveCierre;
-    mostrarResultadoRonda();
-  }
-  if (estado.estado === "EN_RONDA" && $("dlgRonda").open) $("dlgRonda").close();
-}
-
 /** Latencia percibida: desde que se envio la accion hasta ver la mesa actualizada. */
 function medirLatencia(accionId) {
   if (!accionId || !app.pendientes.has(accionId)) return;
@@ -218,46 +285,167 @@ function medirLatencia(accionId) {
   }
 }
 
-function recibirMano(cartas) {
-  const anteriores = new Set(app.mano.map(claveCarta));
-  const elegidaClave = app.elegida != null && app.mano[app.elegida] ? claveCarta(app.mano[app.elegida]) : null;
-  // Solo se resalta la carta recien robada (la mano crece en una); en una ronda nueva no.
-  const robo = cartas.length === anteriores.size + 1;
-  app.nuevas = new Set(robo ? cartas.map(claveCarta).filter((k) => !anteriores.has(k)) : []);
-  app.mano = cartas;
-  const idx = cartas.findIndex((c) => claveCarta(c) === elegidaClave);
-  app.elegida = idx >= 0 ? idx : null;
-  pintarMano();
-}
-
 function soyYo(id) { return app.credencial && id === app.credencial.jugadorId; }
 
-function pintarMesa() {
+// ---------- estado de la mesa ----------
+function recibirEstado(estado) {
+  medirLatencia(estado.ultimaAccionId);
+  const mov = estado.movimiento;
+  const nuevo = mov && app.ultimaSecuencia !== null && mov.secuencia > app.ultimaSecuencia;
+  // Los origenes de las animaciones se miden ANTES de redibujar la mesa
+  const preparada = nuevo ? prepararAnimacion(mov) : null;
+  if (mov) app.ultimaSecuencia = mov.secuencia;
+  else if (app.ultimaSecuencia === null) app.ultimaSecuencia = 0;
+  app.estado = estado;
+  pintarMesa(preparada);
+  if (preparada) preparada.ejecutar();
+
+  const cierre = estado.ultimoCierre;
+  const claveCierre = cierre ? cierre.ronda + "-" + estado.estado : null;
+  if (estado.estado !== "EN_RONDA" && cierre && claveCierre !== app.ultimoCierreVisto) {
+    app.ultimoCierreVisto = claveCierre;
+    setTimeout(mostrarResultadoRonda, preparada ? DURACION + 150 : 0);
+  }
+  if (estado.estado === "EN_RONDA" && $("dlgRonda").open) $("dlgRonda").close();
+}
+
+/**
+ * Decide que animar segun la ultima jugada. Devuelve un objeto con:
+ *  - ocultarPozo: no mostrar la carta de encima del pozo hasta que llegue la que vuela;
+ *  - ejecutar(): lanza las animaciones despues de redibujar.
+ */
+function prepararAnimacion(mov) {
+  const mia = soyYo(mov.jugadorId);
+  const rectMazo = rectDe($("mazoTope"));
+  const rectPozo = rectDe($("topePozo"));
+  const asiento = () => comoCarta(rectDe(document.querySelector(`.asiento[data-id="${mov.jugadorId}"] .dorsos`)), anchoMini());
+  switch (mov.tipo) {
+    case "ROBO_MAZO":
+      if (mia) { app.vueloHaciaMano = { desde: rectMazo }; return null; }
+      return { ejecutar: () => volar(rectMazo, asiento(), null) };
+    case "ROBO_POZO":
+      if (mia) { app.vueloHaciaMano = { desde: rectPozo }; return null; }
+      return { ejecutar: () => volar(rectPozo, asiento(), mov.carta) };
+    case "DESCARTE":
+    case "CIERRE": {
+      const origen = mia ? document.querySelector(`#mano .carta[data-clave="${claveCarta(mov.carta)}"]`) : null;
+      const desde = mia ? comoCarta(rectDe(origen), origen && origen.offsetWidth) : asiento();
+      if (origen) origen.style.opacity = "0";
+      return {
+        ocultarPozo: true,
+        ejecutar: () => volar(desde, rectDe($("topePozo")), mov.carta, { girar: (Math.random() * 16) - 8 })
+          .then(() => { const t = $("topePozo"); if (t) t.style.visibility = ""; }),
+      };
+    }
+    case "RONDA_NUEVA":
+      app.repartiendo = true;
+      app.mano = [];
+      return {
+        ejecutar: () => {
+          const destinos = [...document.querySelectorAll(".asiento .dorsos")].map((d) => comoCarta(rectDe(d), anchoMini()));
+          destinos.forEach((d, i) => [0, 1, 2].forEach((k) => volar(rectMazo, d, null, { retraso: (k * destinos.length + i) * 70 })));
+        },
+      };
+    default:
+      return null;
+  }
+}
+
+function pintarMesa(preparada) {
   const e = app.estado;
   const modalidad = e.modalidad === "CLASICA" ? "Clásica (4-3-3)" : "Apuntado a " + e.umbral;
   const info = $("infoMesa");
   info.classList.remove("oculto");
   info.innerHTML = `<span>Mesa <b>${e.codigo}</b></span><span>${modalidad}</span><span>Ronda <b>${e.ronda}</b></span>`;
   $("reglaActual").textContent = e.descripcionModalidad;
+  $("lnkMetricasMenu").href = `metricas.html?codigo=${e.codigo}`;
+  pintarMarcador(e);
+  pintarAsientos(e);
+  pintarCentro(e, preparada);
 
-  $("jugadores").innerHTML = "";
-  e.jugadores.forEach((j) => {
-    const div = document.createElement("div");
-    div.className = "jugador" + (j.id === e.turnoDe ? " en-turno" : "") + (soyYo(j.id) ? " yo" : "") + (j.eliminado ? " eliminado" : "");
-    const pct = Math.min(100, Math.round((j.acumulado / e.umbral) * 100));
-    const etiqueta = j.eliminado ? '<span class="etiqueta gris">eliminado</span>'
-      : j.id === e.turnoDe ? '<span class="etiqueta">en turno</span>' : "";
-    div.innerHTML = `<div class="nombre"><span>${escapar(j.nombre)}${soyYo(j.id) ? " (tú)" : ""}</span>${etiqueta}</div>
-      <div class="detalle">${j.cartasEnMano} cartas · ${j.acumulado} / ${e.umbral} pts</div>
-      <div class="barra-puntos ${pct >= 75 ? "peligro" : ""}"><span style="width:${pct}%"></span></div>`;
-    $("jugadores").appendChild(div);
+  const yo = e.jugadores.find((j) => soyYo(j.id));
+  $("miNombre").textContent = yo ? yo.nombre + " (tú)" : "";
+  $("misPuntos").textContent = yo ? `· ${yo.acumulado} / ${e.umbral} pts` : "";
+  const miTurno = e.estado === "EN_RONDA" && soyYo(e.turnoDe);
+  $("zonaMia").classList.toggle("en-turno", miTurno);
+  const msj = $("mensajeTurno");
+  const texto = textoTurno(e, miTurno);
+  if (msj.textContent !== texto) {
+    msj.textContent = texto;
+    msj.classList.toggle("mio", miTurno);
+  }
+  $("ultimoMovimiento").textContent = e.ultimoMovimiento || "";
+  actualizarBotones();
+}
+
+function pintarMarcador(e) {
+  $("tablaMarcador").innerHTML = e.jugadores.map((j) =>
+    `<tr><td>${escapar(j.nombre)}${soyYo(j.id) ? " (tú)" : ""}</td><td>${j.acumulado} / ${e.umbral}${j.eliminado ? " · eliminado" : ""}</td></tr>`).join("");
+}
+
+/** Los rivales se sientan en orden de turno empezando a mi izquierda. */
+function posiciones(cantidad) {
+  return { 1: ["arriba"], 2: ["izquierda", "derecha"], 3: ["izquierda", "arriba", "derecha"] }[cantidad] || [];
+}
+
+function pintarAsientos(e) {
+  const cont = $("asientos");
+  const yo = e.jugadores.findIndex((j) => soyYo(j.id));
+  const rivales = e.jugadores.slice(yo + 1).concat(e.jugadores.slice(0, Math.max(yo, 0)));
+  const lugares = posiciones(rivales.length);
+  rivales.forEach((j, i) => {
+    let el = cont.querySelector(`.asiento[data-id="${j.id}"]`);
+    if (!el) {
+      el = document.createElement("div");
+      el.dataset.id = j.id;
+      el.innerHTML = `<div class="dorsos"></div><div class="placa"></div>`;
+      cont.appendChild(el);
+    }
+    el.className = `asiento ${lugares[i]}` + (j.id === e.turnoDe ? " en-turno" : "") + (j.eliminado ? " eliminado" : "");
+    const dorsos = el.querySelector(".dorsos");
+    const cantidad = j.eliminado ? 0 : Math.min(j.cartasEnMano, 11);
+    while (dorsos.children.length < cantidad) dorsos.appendChild(crearDorso());
+    while (dorsos.children.length > cantidad) dorsos.lastChild.remove();
+    [...dorsos.children].forEach((d, k) => {
+      const ang = (k - (cantidad - 1) / 2) * 4;
+      d.style.transform = `rotate(${ang}deg) translateY(${Math.abs(ang) * .6}px)`;
+    });
+    if (lugares[i] !== "arriba") {
+      // el abanico se dibuja girado 90 grados: se reserva el alto que realmente ocupa
+      const w = anchoMini();
+      const largo = w * (1 + Math.max(cantidad - 1, 0) * 0.38);
+      dorsos.style.margin = `${Math.max((largo - w * 1.4) / 2, 0) + 6}px 0`;
+    } else {
+      dorsos.style.margin = "";
+    }
+    const etiquetas = [];
+    if (e.abridorId === j.id && e.estado === "EN_RONDA") etiquetas.push("abre");
+    if (j.id === e.turnoDe) etiquetas.push("en turno");
+    if (j.eliminado) etiquetas.push("eliminado");
+    el.querySelector(".placa").innerHTML = `<b>${escapar(j.nombre)}</b><small>${j.acumulado} / ${e.umbral} pts · ${j.cartasEnMano} cartas</small>`
+      + `<div>${etiquetas.map((t) => `<span class="etiq">${t}</span>`).join("")}</div>`;
   });
+  [...cont.children].forEach((el) => { if (!rivales.some((j) => String(j.id) === el.dataset.id)) el.remove(); });
+}
 
+function pintarCentro(e, preparada) {
   $("cartasMazo").textContent = e.cartasEnMazo;
   $("cartasPozo").textContent = e.cartasEnPozo;
+  const pila = $("pilaPozo");
+  pila.innerHTML = "";
+  if (e.cartasEnPozo > 1) {
+    const debajo = crearDorso();
+    debajo.className = "carta debajo";
+    debajo.style.transform = "rotate(-6deg) translate(-2px, 2px)";
+    debajo.style.background = "#f1ede4";
+    pila.appendChild(debajo);
+  }
   const tope = e.topePozo ? crearCarta(e.topePozo) : Object.assign(document.createElement("span"), { className: "carta vacia" });
   tope.id = "topePozo";
-  $("topePozo").replaceWith(tope);
+  if (e.topePozo) tope.style.transform = "rotate(3deg)";
+  if (preparada && preparada.ocultarPozo && !SIN_MOVIMIENTO) tope.style.visibility = "hidden";
+  pila.appendChild(tope);
+  $("mazoTope").style.visibility = e.cartasEnMazo > 0 ? "" : "hidden";
 
   const miTurno = e.estado === "EN_RONDA" && soyYo(e.turnoDe);
   const debeRobar = miTurno && e.fase === "ROBAR";
@@ -265,9 +453,6 @@ function pintarMesa() {
   $("pozo").disabled = !debeRobar || !e.topePozo;
   $("mazo").classList.toggle("activo", debeRobar);
   $("pozo").classList.toggle("activo", debeRobar && !!e.topePozo);
-  $("mensajeTurno").textContent = textoTurno(e, miTurno);
-  $("ultimoMovimiento").textContent = e.ultimoMovimiento || "";
-  actualizarBotones();
 }
 
 function textoTurno(e, miTurno) {
@@ -287,32 +472,88 @@ function actualizarBotones() {
   $("btnCerrar").disabled = !puedeDescartar;
 }
 
+// ---------- mi mano ----------
+function recibirMano(cartas) {
+  const anteriores = new Set(app.mano.map(claveCarta));
+  const robo = cartas.length === anteriores.size + 1;
+  const nuevas = robo ? cartas.map(claveCarta).filter((k) => !anteriores.has(k)) : [];
+  app.nuevas = new Set(nuevas);
+  app.mano = cartas;
+  if (app.elegida && !cartas.some((c) => claveCarta(c) === app.elegida)) app.elegida = null;
+  const repartir = app.repartiendo;
+  app.repartiendo = false;
+  pintarMano();
+
+  if (repartir && !SIN_MOVIMIENTO) {
+    const desde = rectDe($("mazoTope"));
+    [...$("mano").children].forEach((el, i) => {
+      el.style.opacity = "0";
+      volar(desde, comoCarta(rectDe(el), el.offsetWidth), null, { retraso: 120 + i * 60 }).then(() => { el.style.opacity = ""; });
+    });
+  } else if (app.vueloHaciaMano && nuevas.length === 1 && !SIN_MOVIMIENTO) {
+    const el = document.querySelector(`#mano .carta[data-clave="${nuevas[0]}"]`);
+    const carta = cartas.find((c) => claveCarta(c) === nuevas[0]);
+    if (el) {
+      el.style.opacity = "0";
+      volar(app.vueloHaciaMano.desde, comoCarta(rectDe(el), el.offsetWidth), carta).then(() => { el.style.opacity = ""; });
+    }
+  }
+  app.vueloHaciaMano = null;
+}
+
+/** Abanico: cada carta gira un poco y se monta sobre la anterior. */
+function disposicion(i, n, anchoMano, anchoCarta) {
+  const centro = (n - 1) / 2;
+  const util = anchoMano - anchoCarta * 2.2; // margen para que el giro no saque cartas de la pantalla
+  const paso = n > 1 ? Math.max(Math.min(anchoCarta * 0.72, util / (n - 1)), anchoCarta * 0.28) : 0;
+  const ang = (i - centro) * Math.min(5, 40 / Math.max(n, 1));
+  const x = (i - centro) * paso;
+  const y = (i - centro) * (i - centro) * anchoCarta * 0.018;
+  return { x, y, ang };
+}
+
 function pintarMano() {
   const cont = $("mano");
-  cont.innerHTML = "";
+  const existentes = new Map([...cont.children].map((el) => [el.dataset.clave, el]));
+  const anchoMano = cont.clientWidth;
+  const anchoCarta = parseFloat(getComputedStyle(cont).getPropertyValue("--cw")) || 70;
+  const muestra = cont.querySelector(".carta");
+  const ancho = muestra ? muestra.offsetWidth : anchoCarta;
   app.mano.forEach((c, i) => {
-    const el = crearCarta(c);
-    if (i === app.elegida) el.classList.add("elegida");
-    if (app.nuevas.has(claveCarta(c))) el.classList.add("nueva");
-    el.draggable = true;
+    const clave = claveCarta(c);
+    let el = existentes.get(clave);
+    if (el) existentes.delete(clave);
+    else el = crearCartaDeMano(c);
+    const { x, y, ang } = disposicion(i, app.mano.length, anchoMano, ancho);
+    const elevar = clave === app.elegida ? -26 : 0;
+    el.style.transform = `translateX(calc(-50% + ${x}px)) translateY(${y + elevar}px) rotate(${ang}deg)`;
+    el.style.zIndex = String(i + 1);
     el.dataset.indice = i;
-    el.addEventListener("click", () => { app.elegida = app.elegida === i ? null : i; pintarMano(); });
-    el.addEventListener("dragstart", (ev) => { ev.dataTransfer.setData("text/plain", i); el.classList.add("arrastrando"); });
-    el.addEventListener("dragend", () => el.classList.remove("arrastrando"));
-    el.addEventListener("dragover", (ev) => ev.preventDefault());
-    el.addEventListener("drop", (ev) => { ev.preventDefault(); moverCarta(Number(ev.dataTransfer.getData("text/plain")), i); });
-    cont.appendChild(el);
+    el.classList.toggle("elegida", clave === app.elegida);
+    el.classList.toggle("nueva", app.nuevas.has(clave));
+    cont.appendChild(el); // mantiene el orden del DOM igual al de la mano
   });
-  $("cuentaMano").textContent = app.mano.length ? `(${app.mano.length} cartas)` : "";
+  existentes.forEach((el) => el.remove());
+  $("cuentaMano").textContent = app.mano.length ? `· ${app.mano.length} cartas` : "";
   actualizarBotones();
 }
 
+function crearCartaDeMano(c) {
+  const el = crearCarta(c);
+  const clave = claveCarta(c);
+  el.draggable = true;
+  el.addEventListener("click", () => { app.elegida = app.elegida === clave ? null : clave; pintarMano(); });
+  el.addEventListener("dragstart", (ev) => { ev.dataTransfer.setData("text/plain", el.dataset.indice); el.classList.add("arrastrando"); });
+  el.addEventListener("dragend", () => el.classList.remove("arrastrando"));
+  el.addEventListener("dragover", (ev) => ev.preventDefault());
+  el.addEventListener("drop", (ev) => { ev.preventDefault(); moverCarta(Number(ev.dataTransfer.getData("text/plain")), Number(el.dataset.indice)); });
+  return el;
+}
+
 function moverCarta(desde, hasta) {
-  if (desde === hasta || Number.isNaN(desde)) return;
-  const elegidaClave = app.elegida != null ? claveCarta(app.mano[app.elegida]) : null;
+  if (desde === hasta || Number.isNaN(desde) || Number.isNaN(hasta)) return;
   const [carta] = app.mano.splice(desde, 1);
   app.mano.splice(hasta, 0, carta);
-  app.elegida = elegidaClave ? app.mano.findIndex((c) => claveCarta(c) === elegidaClave) : null;
   pintarMano();
   enviar("ORDENAR", { orden: app.mano });
 }
@@ -320,11 +561,9 @@ function moverCarta(desde, hasta) {
 function ordenarMano(criterio) {
   const rango = (c) => VALORES.indexOf(c.valor);
   const palo = (c) => Object.keys(PALOS).indexOf(c.palo);
-  const elegidaClave = app.elegida != null ? claveCarta(app.mano[app.elegida]) : null;
   app.mano.sort(criterio === "palo" ? (a, b) => palo(a) - palo(b) || rango(a) - rango(b)
     : (a, b) => rango(a) - rango(b) || palo(a) - palo(b));
-  app.elegida = elegidaClave ? app.mano.findIndex((c) => claveCarta(c) === elegidaClave) : null;
-  pintarMano();
+  pintarMano(); // las cartas se deslizan a su nuevo lugar con la transicion CSS
   enviar("ORDENAR", { orden: app.mano });
 }
 
@@ -333,19 +572,22 @@ $("btnOrdenPalo").addEventListener("click", () => ordenarMano("palo"));
 $("mazo").addEventListener("click", () => enviar("ROBAR_MAZO"));
 $("pozo").addEventListener("click", () => enviar("TOMAR_POZO"));
 $("btnDescartar").addEventListener("click", () => {
-  if (app.elegida == null) return;
-  enviar("DESCARTAR", { carta: app.mano[app.elegida] });
+  const carta = app.mano.find((c) => claveCarta(c) === app.elegida);
+  if (!carta) return;
+  enviar("DESCARTAR", { carta });
   app.elegida = null;
 });
 $("btnCerrar").addEventListener("click", () => {
-  if (app.elegida == null) return;
-  enviar("CERRAR", { carta: app.mano[app.elegida] });
+  const carta = app.mano.find((c) => claveCarta(c) === app.elegida);
+  if (carta) enviar("CERRAR", { carta });
 });
+window.addEventListener("resize", () => { if (app.estado) pintarMano(); });
 
 // ---------- fin de ronda ----------
 function mostrarResultadoRonda() {
   const e = app.estado;
   const c = e.ultimoCierre;
+  if (!c) return;
   const terminada = e.estado === "FINALIZADA";
   const ganador = terminada ? e.jugadores.find((j) => j.id === e.ganadorId) : null;
   $("rondaTitulo").textContent = terminada
@@ -354,8 +596,9 @@ function mostrarResultadoRonda() {
 
   const comb = $("rondaCombinaciones");
   comb.innerHTML = "";
-  c.combinacionesCerrador.forEach((g) => comb.appendChild(grupoCartas(g)));
-  if (c.sobrantesCerrador.length) comb.appendChild(grupoCartas(c.sobrantesCerrador, "sobrante"));
+  let retraso = 0;
+  c.combinacionesCerrador.forEach((g) => { comb.appendChild(grupoCartas(g, "", retraso)); retraso += g.length * 70; });
+  if (c.sobrantesCerrador.length) comb.appendChild(grupoCartas(c.sobrantesCerrador, "sobrante", retraso));
   const desc = document.createElement("div");
   desc.className = "sub";
   desc.textContent = "Descartó el " + textoCarta(c.descarte);
@@ -366,10 +609,10 @@ function mostrarResultadoRonda() {
   c.penalizaciones.forEach((p) => {
     const tr = document.createElement("tr");
     const celda = document.createElement("td");
-    celda.appendChild(grupoCartas(p.cartasSueltas));
+    celda.appendChild(grupoCartas(p.cartasSueltas, "", 200));
     tr.innerHTML = `<td>${escapar(p.nombre)}${p.jugadorId === c.cerradorId ? " (cerró)" : ""}</td>`;
     tr.appendChild(celda);
-    tr.insertAdjacentHTML("beforeend", `<td>+${p.puntos}</td><td>${p.acumulado}${p.eliminado ? ' <span class="etiqueta gris">eliminado</span>' : ""}</td>`);
+    tr.insertAdjacentHTML("beforeend", `<td>+${p.puntos}</td><td>${p.acumulado}${p.eliminado ? ' <span class="etiq" style="background:#cfcac0">eliminado</span>' : ""}</td>`);
     tbody.appendChild(tr);
   });
 
@@ -384,8 +627,16 @@ function mostrarResultadoRonda() {
 $("btnSiguiente").addEventListener("click", () => enviar("SIGUIENTE_RONDA"));
 $("btnNueva").addEventListener("click", () => { $("dlgRonda").close(); salir(); });
 
-// ---------- ayuda y arranque ----------
+// ---------- menu, ayuda y arranque ----------
+function abrirMenu(abrir) {
+  $("menu").classList.toggle("abierto", abrir);
+  $("menu").setAttribute("aria-hidden", String(!abrir));
+}
+$("btnMenu").addEventListener("click", () => abrirMenu(!$("menu").classList.contains("abierto")));
+$("btnCerrarMenu").addEventListener("click", () => abrirMenu(false));
 $("btnAyuda").addEventListener("click", () => $("dlgAyuda").showModal());
+$("btnAyudaMenu").addEventListener("click", () => { abrirMenu(false); $("dlgAyuda").showModal(); });
+$("btnSalir").addEventListener("click", () => { abrirMenu(false); salir(); });
 document.querySelectorAll("[data-cerrar]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
 
 function salir() {
@@ -394,18 +645,19 @@ function salir() {
   app.credencial = null;
   app.ws = null;
   if (ws) ws.close();
+  clearInterval(app.sondeoSala);
   app.mano = [];
   app.estado = null;
+  $("mano").innerHTML = "";
+  $("asientos").innerHTML = "";
   $("infoMesa").classList.add("oculto");
   $("latencia").classList.add("oculto");
+  $("menuPartida").classList.add("oculto");
   mostrarVista("vistaInicio");
 }
 
-function escapar(texto) {
-  return String(texto).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
-}
-
 (async function iniciar() {
+  pintarPortada();
   try { await cargarModalidades(); } catch (err) { aviso("No se pudo contactar al servidor", "error"); }
   const params = new URLSearchParams(location.search);
   if (params.get("sala")) document.querySelector("#formUnirse [name=codigo]").value = params.get("sala");

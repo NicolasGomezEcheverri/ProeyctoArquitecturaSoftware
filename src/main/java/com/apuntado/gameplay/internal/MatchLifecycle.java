@@ -94,7 +94,8 @@ class MatchLifecycle implements IControlPartida {
         int rondaId = registroPartida.abrirRonda(mesa.partidaId(), numero);
         Reparto reparto = mazo.repartir(mazo.generarYBarajar(aleatorio), orden.size(), orden.indexOf(abridorId));
         mesa.empezarRonda(new RondaEnJuego(numero, rondaId, orden, orden.indexOf(abridorId), reparto));
-        mesa.registrarMovimiento(null, "Ronda " + numero + ": abre " + mesa.nombreDe(abridorId));
+        mesa.registrarMovimiento(null, "Ronda " + numero + ": abre " + mesa.nombreDe(abridorId), "RONDA_NUEVA",
+                abridorId, null);
         historial.registrarEvento(EventoJuego.de(mesa.partidaId(), numero, rondaId, abridorId,
                 TipoEvento.RONDA_INICIADA, "Abre con 11 cartas"));
         historial.registrarEvento(EventoJuego.de(mesa.partidaId(), numero, rondaId, abridorId,

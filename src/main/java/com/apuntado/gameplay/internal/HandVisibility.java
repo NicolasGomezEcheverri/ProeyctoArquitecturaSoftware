@@ -50,6 +50,7 @@ class HandVisibility {
                 mesa.umbral(), mesa.estado().name(), ronda.numero(),
                 enRonda ? ronda.fase().name() : null, enRonda ? ronda.jugadorEnTurno() : null, jugadores,
                 ronda.cartasEnMazo(), ronda.topePozo(), ronda.cartasEnPozo(), mesa.ultimoCierre(),
-                mesa.ganadorId(), mesa.secuencia(), mesa.ultimaAccionId(), mesa.ultimoMovimiento());
+                mesa.ganadorId(), mesa.secuencia(), mesa.ultimaAccionId(), mesa.ultimoMovimiento(),
+                mesa.movimiento(), mesa.abridorActual());
     }
 }
