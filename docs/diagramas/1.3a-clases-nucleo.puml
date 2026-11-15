@@ -1,0 +1,140 @@
+@startuml 1.3a-clases-nucleo
+' Entregable 3 - 1.3 Diagrama UML de clases de implementacion (codigo real del MVP)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam monochrome true
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam nodesep 35
+skinparam ranksep 45
+hide empty members
+left to right direction
+set separator none
+title Clases de implementación (1/2) — núcleo de orquestación de turnos (gameplay)
+
+package "com.apuntado.gameplay.internal" {
+  class TurnOrchestrator <<Service>> {
+    - mesas : TablaMesas
+    - cola : ColaPorPartida
+    - cierre : CloseRequest
+    - ciclo : MatchLifecycle
+    - visibilidad : HandVisibility
+    - mazo : IMazo
+    - historial : IHistorial
+    - aleatorio : RandomGenerator
+    + robarDelMazo(c : Credencial, accionId : String) : ResultadoAccion
+    + tomarDelPozo(c : Credencial, accionId : String) : ResultadoAccion
+    + descartar(c : Credencial, carta : Carta, accionId : String) : ResultadoAccion
+    + solicitarCierre(c : Credencial, descarte : Carta, accionId : String) : ResultadoAccion
+    + siguienteRonda(c : Credencial) : ResultadoAccion
+    - ejecutar(c : Credencial, accionId : String, accion : Accion) : ResultadoAccion
+    - reconstruirSiHaceFalta(mesa : Mesa, ronda : RondaEnJuego) : void
+  }
+  class CloseRequest <<Component>> {
+    - evaluador : IEvaluadorCombinaciones
+    - cierreTransaccional : CierreRondaTransaccional
+    - historial : IHistorial
+    ~ procesar(mesa : Mesa, cerrador : Participante, descarte : Carta) : ResultadoAccion
+    - liquidarPerdedores(ronda : RondaEnJuego, cerradorId : int, penalizaciones : Map<Integer,Integer>, sueltas : Map<Integer,List<Carta>>) : void
+  }
+  class CierreRondaTransaccional <<Service>> {
+    - partidas : PartidaRepository
+    - rondas : RondaRepository
+    - puntuacion : IPuntuacion
+    - historial : IHistorial
+    + registrar(datos : DatosCierre) : ResultadoCierreRonda  {@Transactional}
+    ~ {static} determinarGanador(m : Marcador, cerradorId : int) : Integer
+  }
+  class MatchLifecycle <<Component>> {
+    - registroReglas : IRegistroReglas
+    + iniciarPartida(cfg : ConfiguracionInicio) : int
+    + modalidadesDisponibles() : Map<String,String>
+    ~ siguienteRonda(mesa : Mesa) : void
+    - repartirRonda(mesa : Mesa, abridorId : int, numero : int) : void
+  }
+  class Mesa {
+    - partidaId : int
+    - codigo : String
+    - regla : ReglaJuego
+    - umbral : int
+    - participantes : List<Participante>
+    - estado : Mesa.Estado
+    - ronda : RondaEnJuego
+    ~ autenticar(jugadorId : int, token : String) : Participante
+    ~ terminarRonda(resumen : ResumenCierre, ganador : Integer) : void
+    ~ siguienteAbridor(activos : List<Integer>) : int
+  }
+  class RondaEnJuego {
+    - mazo : Deque<Carta>
+    - pozo : Deque<Carta>
+    - manos : Map<Integer, List<Carta>>
+    - posicionTurno : int
+    - fase : RondaEnJuego.Fase
+    ~ exigirTurno(jugadorId : int, esperada : Fase) : void
+    ~ robarDelMazo(jugadorId : int) : Carta
+    ~ tomarDelPozo(jugadorId : int) : Carta
+    ~ descartar(jugadorId : int, carta : Carta) : void
+    ~ manoSin(jugadorId : int, carta : Carta) : List<Carta>
+  }
+  class ColaPorPartida <<Component>> {
+    - colas : Map<String, ExecutorService>
+    ~ ejecutar<T>(codigo : String, tarea : Supplier<T>) : T
+  }
+  class HandVisibility <<Component>> {
+    - notificador : INotificadorEstado
+    ~ difundir(mesa : Mesa) : void
+    ~ estadoPublico(mesa : Mesa) : EstadoPublico
+  }
+}
+package "com.apuntado.gameplay.api" {
+  interface IAccionesJugador
+  interface INotificadorEstado {
+    + publicarEstadoPublico(codigo : String, estado : EstadoPublico) : void
+    + enviarManoPrivada(codigo : String, jugadorId : int, mano : List<Carta>) : void
+  }
+}
+package "com.apuntado.scoring.api" {
+  interface IPuntuacion {
+    + abrirMarcador(partidaId : int, jugadores : List<Integer>, umbral : int) : void
+    + liquidarRonda(partidaId : int, rondaId : int, penalizaciones : Map<Integer,Integer>) : ResultadoLiquidacion
+    + consultarMarcador(partidaId : int) : Marcador
+  }
+}
+package "com.apuntado.history.api" {
+  interface IHistorial {
+    + registrarEvento(evento : EventoJuego) : void
+    + eventosDePartida(partidaId : int) : List<EventoJuego>
+    + metricas(partidaId : int) : List<MetricasJugador>
+  }
+}
+package "com.apuntado.rules.api" {
+  interface ReglaJuego <<Strategy>> {
+    + validarCierre(mano : Mano) : ResultadoValidacion
+    + penalizacionCerrador(mano : Mano) : int
+  }
+  interface IEvaluadorCombinaciones {
+    + evaluarCombinaciones(mano : Mano) : ResultadoCombinaciones
+  }
+  interface IRegistroReglas {
+    + obtenerRegla(modalidad : String) : ReglaJuego
+  }
+}
+
+IAccionesJugador <|.. TurnOrchestrator
+TurnOrchestrator --> ColaPorPartida
+TurnOrchestrator --> CloseRequest
+TurnOrchestrator --> MatchLifecycle
+TurnOrchestrator --> HandVisibility
+TurnOrchestrator ..> IHistorial
+CloseRequest --> CierreRondaTransaccional
+CloseRequest --> IEvaluadorCombinaciones : perdedores
+CloseRequest ..> ReglaJuego : validarCierre()
+CierreRondaTransaccional --> IPuntuacion
+CierreRondaTransaccional --> IHistorial
+MatchLifecycle --> IRegistroReglas
+HandVisibility --> INotificadorEstado
+Mesa "1" *-- "0..1" RondaEnJuego
+Mesa --> "1" ReglaJuego : regla de la partida
+TurnOrchestrator ..> Mesa
+@enduml

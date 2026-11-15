@@ -4,7 +4,9 @@
 |---|---|
 | `1.1-despliegue.*` | 1.1 Diagrama UML de despliegue |
 | `1.2-secuencia-cierre.*` | 1.2 Diagrama UML de secuencia del cierre de ronda y la liquidación |
-| `1.3-clases-implementacion.*` | 1.3 Diagrama UML de clases de implementación |
+| `1.3a-clases-nucleo.*` | 1.3 Clases de implementación, vista 1: núcleo de orquestación (gameplay) |
+| `1.3b-clases-reglas.*` | 1.3 Clases de implementación, vista 2: motor de reglas (Strategy + ServiceLoader) |
+| `1.3-clases-implementacion.*` | 1.3 Las dos vistas juntas en un solo diagrama (muy ancho; útil en SVG) |
 
 Las fuentes son PlantUML (`.puml`). Para regenerar las imágenes:
 
@@ -12,4 +14,4 @@ Las fuentes son PlantUML (`.puml`). Para regenerar las imágenes:
 java -jar plantuml.jar -tpng -tsvg docs/diagramas/*.puml
 ```
 
-El diagrama de clases es ancho; el `.svg` se puede ampliar sin perder nitidez.
+Para el informe se usan las vistas 1.3a y 1.3b; el diagrama completo queda como referencia.

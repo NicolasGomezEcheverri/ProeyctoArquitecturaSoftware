@@ -1,0 +1,144 @@
+@startuml 1.3b-clases-reglas
+' Entregable 3 - 1.3 Diagrama UML de clases de implementacion (codigo real del MVP)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam monochrome true
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam nodesep 35
+skinparam ranksep 45
+hide empty members
+left to right direction
+set separator none
+title Clases de implementación (2/2) — motor de reglas como Strategy + registro ServiceLoader (rules)
+
+package "com.apuntado.rules.api" {
+  interface ReglaJuego <<Strategy>> {
+    + modalidad() : String
+    + descripcion() : String
+    + validarCierre(mano : Mano) : ResultadoValidacion
+    + penalizacionCerrador(mano : Mano) : int
+  }
+  interface IEvaluadorCombinaciones {
+    + evaluarCombinaciones(mano : Mano) : ResultadoCombinaciones
+    + buscarDistribucion(mano : Mano, cuartas : int, ternas : int) : Optional<ResultadoCombinaciones>
+  }
+  interface IRegistroReglas {
+    + obtenerRegla(modalidad : String) : ReglaJuego
+    + modalidadesDisponibles() : Map<String,String>
+  }
+  class ResultadoValidacion <<record>> {
+    + valido : boolean
+    + condicionIncumplida : String
+    + combinaciones : List<Combinacion>
+    + sobrantes : List<Carta>
+    + {static} ok(d : ResultadoCombinaciones) : ResultadoValidacion
+    + {static} rechazo(condicion : String) : ResultadoValidacion
+  }
+  class ResultadoCombinaciones <<record>> {
+    + combinaciones : List<Combinacion>
+    + sueltas : List<Carta>
+    + puntosSueltos() : int
+    + ternas() : long
+    + cuartas() : long
+  }
+  class Combinacion <<record>> {
+    + forma : Combinacion.Forma
+    + cartas : List<Carta>
+    + esTerna() : boolean
+    + esCuarta() : boolean
+  }
+}
+package "com.apuntado.rules.clasica" {
+  class ReglaClasicaCuartaTerna {
+    ~ {static} CARTAS_AL_CERRAR : int = 10
+    - evaluador : IEvaluadorCombinaciones
+    + validarCierre(mano : Mano) : ResultadoValidacion
+    + penalizacionCerrador(mano : Mano) : int
+  }
+}
+package "com.apuntado.rules.apuntado" {
+  class ReglaApuntado101 {
+    ~ {static} LIMITE_SOBRANTES : int = 5
+    - evaluador : IEvaluadorCombinaciones
+    + validarCierre(mano : Mano) : ResultadoValidacion
+    + penalizacionCerrador(mano : Mano) : int
+  }
+}
+package "com.apuntado.rules.registry" {
+  class RegistroReglas {
+    - reglas : Map<String, ReglaJuego>
+    + RegistroReglas()
+    + obtenerRegla(modalidad : String) : ReglaJuego
+  }
+}
+package "com.apuntado.rules.evaluacion" {
+  class EvaluadorCombinaciones {
+    - generador : GeneradorCandidatas
+    + evaluarCombinaciones(mano : Mano) : ResultadoCombinaciones
+    + buscarDistribucion(mano : Mano, cuartas : int, ternas : int) : Optional<ResultadoCombinaciones>
+  }
+  class GeneradorCandidatas {
+    ~ generar(cartas : List<Carta>) : List<Candidata>
+    - agregarGrupos(cartas : List<Carta>, salida : List<Candidata>) : void
+    - agregarEscaleras(cartas : List<Carta>, salida : List<Candidata>) : void
+  }
+  class BusquedaParticion {
+    - mejorPuntos : int
+    ~ ejecutar() : Optional<ResultadoCombinaciones>
+    - explorar(paso : Paso) : void
+    - ramificar(paso : Paso) : void
+    - debePodar(paso : Paso) : boolean
+  }
+  class Candidata <<record>> {
+    ~ mascara : int
+    ~ forma : Combinacion.Forma
+  }
+  class CriterioBusqueda <<record>> {
+    ~ libre : boolean
+    ~ cuartas : int
+    ~ ternas : int
+  }
+}
+package "com.apuntado.shared" {
+  class Mano <<record>> {
+    + cartas : List<Carta>
+  }
+  class Carta <<record>> {
+    + palo : Palo
+    + valor : Valor
+    + valorPuntos() : int
+  }
+}
+
+ReglaJuego <|.. ReglaClasicaCuartaTerna
+ReglaJuego <|.. ReglaApuntado101
+IRegistroReglas <|.. RegistroReglas
+RegistroReglas o-- "*" ReglaJuego : ServiceLoader\n(META-INF/services)
+IEvaluadorCombinaciones <|.. EvaluadorCombinaciones
+ReglaClasicaCuartaTerna --> IEvaluadorCombinaciones
+ReglaApuntado101 --> IEvaluadorCombinaciones
+EvaluadorCombinaciones *-- GeneradorCandidatas
+EvaluadorCombinaciones ..> BusquedaParticion : crea
+BusquedaParticion --> "*" Candidata
+BusquedaParticion --> CriterioBusqueda
+ReglaJuego ..> ResultadoValidacion
+IEvaluadorCombinaciones ..> ResultadoCombinaciones
+ResultadoCombinaciones *-- "*" Combinacion
+ResultadoValidacion *-- "*" Combinacion
+ReglaJuego ..> Mano
+Mano *-- "10..11" Carta
+note bottom of ReglaJuego
+  Strategy: gameplay solo conoce esta interfaz (regla 2C de ArchUnit).
+  Una variante nueva = otra clase que la implemente
+  + una línea en META-INF/services. No se toca gameplay.
+end note
+note right of BusquedaParticion
+  Backtracking sobre máscaras de bits:
+  cada carta libre se deja suelta o abre
+  una combinación disjunta. Poda cuando
+  los puntos sueltos superan al mejor reparto.
+  CC máx. por método = 4.
+end note
+@enduml
