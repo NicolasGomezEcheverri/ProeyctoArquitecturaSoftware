@@ -149,7 +149,12 @@ legend { font-size: .9rem; color: var(--suave); margin-bottom: .3rem; }
 .mano .carta:hover { box-shadow: 0 0 0 2px rgba(255, 255, 255, .7), var(--sombra-carta); }
 .mano .carta.elegida { box-shadow: 0 0 0 3px var(--dorado), var(--sombra-carta); }
 .mano .carta.nueva::after { content: ""; position: absolute; inset: -3px; border-radius: 10px; border: 2px solid #8fe0b0; animation: brillo 1.6s ease-out forwards; }
-.mano .carta.arrastrando { opacity: .4; }
+.mano .carta { touch-action: none; }
+.mano .carta.arrastrada { opacity: 0 !important; }
+.carta.arrastre { z-index: 60; cursor: grabbing; box-shadow: 0 16px 30px rgba(0, 0, 0, .45); }
+#pozo .pila { transition: transform .15s, outline-color .15s; outline: 2px dashed transparent; outline-offset: 7px; border-radius: 9px; }
+#pozo.destino .pila { outline-color: rgba(255, 255, 255, .65); }
+#pozo.encima .pila { outline-color: var(--dorado); outline-style: solid; transform: scale(1.07); }
 .botones-juego { display: flex; gap: .5rem; margin-top: .5rem; flex-wrap: wrap; justify-content: center; }
 
 /* ---------- Cartas ---------- */

@@ -24,6 +24,7 @@ const app = {
   ultimaSecuencia: null, // secuencia del ultimo movimiento ya animado
   vueloHaciaMano: null,  // { desde: DOMRect } para la carta que voy a recibir
   repartiendo: false,
+  soltada: null,         // carta arrastrada al pozo que espera la confirmacion del servidor
   sondeoSala: null,
 };
 
@@ -267,7 +268,7 @@ function recibir(msg) {
   if (msg.tipo === "MANO") return recibirMano(msg.cartas);
   if (msg.tipo === "RESULTADO") {
     if (msg.accionId) app.pendientes.delete(msg.accionId);
-    if (!msg.aceptada) aviso(msg.mensaje, "error");
+    if (!msg.aceptada) { cancelarSoltada(); aviso(msg.mensaje, "error"); }
     else if (msg.mensaje && msg.mensaje.startsWith("¡")) aviso(msg.mensaje, "ok");
   }
 }
@@ -329,7 +330,11 @@ function prepararAnimacion(mov) {
     case "DESCARTE":
     case "CIERRE": {
       const origen = mia ? document.querySelector(`#mano .carta[data-clave="${claveCarta(mov.carta)}"]`) : null;
-      const desde = mia ? comoCarta(rectDe(origen), origen && origen.offsetWidth) : asiento();
+      let desde = mia ? comoCarta(rectDe(origen), origen && origen.offsetWidth) : asiento();
+      if (mia && app.soltada && app.soltada.clave === claveCarta(mov.carta)) {
+        desde = rectDe(app.soltada.fantasma); // la carta arrastrada sigue su vuelo desde donde se solto
+        cancelarSoltada();
+      }
       if (origen) origen.style.opacity = "0";
       return {
         ocultarPozo: true,
@@ -540,14 +545,107 @@ function pintarMano() {
 
 function crearCartaDeMano(c) {
   const el = crearCarta(c);
-  const clave = claveCarta(c);
-  el.draggable = true;
-  el.addEventListener("click", () => { app.elegida = app.elegida === clave ? null : clave; pintarMano(); });
-  el.addEventListener("dragstart", (ev) => { ev.dataTransfer.setData("text/plain", el.dataset.indice); el.classList.add("arrastrando"); });
-  el.addEventListener("dragend", () => el.classList.remove("arrastrando"));
-  el.addEventListener("dragover", (ev) => ev.preventDefault());
-  el.addEventListener("drop", (ev) => { ev.preventDefault(); moverCarta(Number(ev.dataTransfer.getData("text/plain")), Number(el.dataset.indice)); });
+  el.draggable = false; // el arrastre se hace con eventos de puntero: sirve igual con mouse y con el dedo
+  el.addEventListener("pointerdown", (ev) => iniciarArrastre(ev, el, c));
   return el;
+}
+
+// ---------- arrastrar cartas: reordenar la mano o soltarlas en el pozo ----------
+const UMBRAL_ARRASTRE = 8; // px que hay que mover antes de que un toque cuente como arrastre
+
+function puedoDescartar() {
+  const e = app.estado;
+  return !!e && e.estado === "EN_RONDA" && soyYo(e.turnoDe) && e.fase === "DESCARTAR";
+}
+
+function dentro(rect, x, y, margen = 0) {
+  return !!rect && x >= rect.left - margen && x <= rect.right + margen && y >= rect.top - margen && y <= rect.bottom + margen;
+}
+
+function iniciarArrastre(ev, el, carta) {
+  if (ev.button !== 0 || app.soltada) return;
+  ev.preventDefault();
+  const clave = claveCarta(carta);
+  const x0 = ev.clientX;
+  const y0 = ev.clientY;
+  let fantasma = null;
+  let caja = null;
+
+  const sobrePozo = (x, y) => dentro(rectDe($("pilaPozo")), x, y, 24);
+  const mover = (e) => {
+    const dx = e.clientX - x0;
+    const dy = e.clientY - y0;
+    if (!fantasma) {
+      if (Math.hypot(dx, dy) < UMBRAL_ARRASTRE) return;
+      caja = comoCarta(rectDe(el), el.offsetWidth);
+      fantasma = crearCarta(carta);
+      fantasma.classList.add("volando", "arrastre");
+      Object.assign(fantasma.style, { left: caja.left + "px", top: caja.top + "px", width: caja.width + "px", height: caja.height + "px" });
+      fantasma.style.setProperty("--cw", caja.width + "px");
+      document.body.appendChild(fantasma);
+      el.classList.add("arrastrada");
+      $("pozo").classList.toggle("destino", puedoDescartar());
+    }
+    fantasma.style.transform = `translate(${dx}px, ${dy}px) rotate(${Math.max(-10, Math.min(10, dx / 25))}deg)`;
+    $("pozo").classList.toggle("encima", puedoDescartar() && sobrePozo(e.clientX, e.clientY));
+  };
+  const terminar = (e) => {
+    window.removeEventListener("pointermove", mover);
+    window.removeEventListener("pointerup", terminar);
+    window.removeEventListener("pointercancel", terminar);
+    $("pozo").classList.remove("destino", "encima");
+    if (!fantasma) { // fue un toque: elegir o soltar la carta
+      app.elegida = app.elegida === clave ? null : clave;
+      pintarMano();
+      return;
+    }
+    if (e.type !== "pointercancel" && sobrePozo(e.clientX, e.clientY)) {
+      if (puedoDescartar()) return soltarEnPozo(carta, el, fantasma);
+      aviso(soyYo(app.estado && app.estado.turnoDe) ? "Primero roba del mazo o del pozo" : "Espera tu turno para descartar", "error");
+    } else if (e.type !== "pointercancel" && dentro(rectDe($("mano")), e.clientX, e.clientY, 40)) {
+      reordenarHasta(clave, e.clientX);
+    }
+    devolver(el, fantasma, caja);
+  };
+  window.addEventListener("pointermove", mover);
+  window.addEventListener("pointerup", terminar);
+  window.addEventListener("pointercancel", terminar);
+}
+
+/** La carta vuelve a su lugar en la mano si no se solto en un sitio valido. */
+function devolver(el, fantasma, caja) {
+  const destino = el.isConnected ? comoCarta(rectDe(el), el.offsetWidth) : caja;
+  const anim = SIN_MOVIMIENTO ? null : fantasma.animate([
+    { transform: fantasma.style.transform },
+    { transform: `translate(${destino.left - caja.left}px, ${destino.top - caja.top}px) rotate(0deg)` },
+  ], { duration: 180, easing: "ease-out", fill: "forwards" });
+  const fin = () => { fantasma.remove(); el.classList.remove("arrastrada"); };
+  if (anim) anim.finished.catch(() => {}).then(fin); else fin();
+}
+
+/** Soltar en el pozo = descartar. La carta queda flotando hasta que el servidor confirma. */
+function soltarEnPozo(carta, el, fantasma) {
+  app.elegida = null;
+  const espera = setTimeout(() => cancelarSoltada(), 2500);
+  app.soltada = { clave: claveCarta(carta), el, fantasma, espera };
+  enviar("DESCARTAR", { carta });
+}
+
+function cancelarSoltada() {
+  const s = app.soltada;
+  if (!s) return;
+  clearTimeout(s.espera);
+  app.soltada = null;
+  s.fantasma.remove();
+  s.el.classList.remove("arrastrada");
+}
+
+/** Mueve la carta a la posicion de la mano mas cercana al punto donde se solto. */
+function reordenarHasta(clave, x) {
+  const desde = app.mano.findIndex((c) => claveCarta(c) === clave);
+  const otras = [...$("mano").children].filter((n) => n.dataset.clave !== clave);
+  const hasta = otras.filter((n) => { const r = n.getBoundingClientRect(); return r.left + r.width / 2 < x; }).length;
+  moverCarta(desde, hasta);
 }
 
 function moverCarta(desde, hasta) {
