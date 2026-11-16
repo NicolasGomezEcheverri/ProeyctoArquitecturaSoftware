@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Métricas de la partida · Apuntado</title>
+  <link rel="stylesheet" href="estilos.css">
+  <style>
+    .tabla-scroll { overflow-x: auto; }
+    .tabla td, .tabla th { white-space: nowrap; }
+    .bitacora td:nth-child(6) { white-space: normal; min-width: 240px; }
+    .descargas { display: flex; gap: 1rem; flex-wrap: wrap; margin: .5rem 0 1rem; }
+    form.buscar { display: flex; gap: .5rem; align-items: flex-end; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <header class="barra"><div class="marca">Apuntado · Métricas</div><a class="btn-texto" href="/">Volver al juego</a></header>
+  <main>
+    <form class="buscar" id="formBuscar">
+      <label>Código de la partida <input name="codigo" maxlength="5" class="codigo-input" required></label>
+      <button class="btn" type="submit">Consultar</button>
+    </form>
+    <section id="resultado" class="oculto">
+      <div class="panel">
+        <h2>Resumen por jugador</h2>
+        <p class="sub">Calculado a partir de la bitácora de auditoría que el servidor guarda durante la partida.</p>
+        <div class="descargas">
+          <a id="csvMetricas" class="btn" href="#">Descargar métricas (CSV)</a>
+          <a id="csvBitacora" class="btn" href="#">Descargar bitácora (CSV)</a>
+        </div>
+        <div class="tabla-scroll">
+          <table class="tabla">
+            <thead><tr>
+              <th>Jugador</th><th>Modalidad</th><th>Turnos</th><th>Seg. por turno</th>
+              <th>Cierres intentados</th><th>Aceptados</th><th>Rechazados</th><th>Acciones rechazadas</th>
+              <th>Latencia prom. (ms)</th><th>Latencia p95 (ms)</th><th>Puntos</th>
+            </tr></thead>
+            <tbody id="tablaMetricas"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:1rem">
+        <h2>Bitácora</h2>
+        <div class="tabla-scroll">
+          <table class="tabla bitacora">
+            <thead><tr><th>Hora</th><th>Ronda</th><th>Jugador</th><th>Evento</th><th>ms</th><th>Detalle</th></tr></thead>
+            <tbody id="tablaBitacora"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    async function consultar(codigo) {
+      codigo = codigo.trim().toUpperCase();
+      const [metricas, bitacora] = await Promise.all([
+        fetch(`/api/partidas/${codigo}/metricas`).then((r) => r.json()),
+        fetch(`/api/partidas/${codigo}/bitacora`).then((r) => r.json()),
+      ]);
+      $("csvMetricas").href = `/api/partidas/${codigo}/metricas.csv`;
+      $("csvBitacora").href = `/api/partidas/${codigo}/bitacora.csv`;
+      $("tablaMetricas").innerHTML = metricas.map((m) => `<tr>
+        <td>${esc(m.nombre)}</td><td>${esc(m.modalidad)}</td><td>${m.turnos}</td><td>${m.segundosPromedioTurno}</td>
+        <td>${m.cierresIntentados}</td><td>${m.cierresAceptados}</td><td>${m.cierresRechazados}</td>
+        <td>${m.accionesRechazadas}</td><td>${m.latenciaPromedioMs ?? "—"}</td><td>${m.latenciaP95Ms ?? "—"}</td>
+        <td>${m.acumulado}${m.eliminado ? " (eliminado)" : ""}</td></tr>`).join("")
+        || '<tr><td colspan="11">No hay datos para ese código.</td></tr>';
+      $("tablaBitacora").innerHTML = bitacora.filter((b) => b.tipo !== "LATENCIA_CLIENTE").map((b) => `<tr>
+        <td>${new Date(b.ocurridoEn).toLocaleTimeString()}</td><td>${b.ronda ?? ""}</td><td>${esc(b.jugadorId ? b.jugador : "")}</td>
+        <td>${esc(b.tipo)}</td><td>${b.valorMs ?? ""}</td><td>${esc(b.detalle)}</td></tr>`).join("");
+      $("resultado").classList.remove("oculto");
+    }
+
+    $("formBuscar").addEventListener("submit", (e) => {
+      e.preventDefault();
+      consultar(new FormData(e.target).get("codigo")).catch(() => {
+        $("tablaMetricas").innerHTML = '<tr><td colspan="11">No se pudo consultar esa partida.</td></tr>';
+        $("resultado").classList.remove("oculto");
+      });
+    });
+    const inicial = new URLSearchParams(location.search).get("codigo");
+    if (inicial) { document.querySelector("[name=codigo]").value = inicial; consultar(inicial); }
+  </script>
+</body>
+</html>

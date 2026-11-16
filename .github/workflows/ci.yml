@@ -1,0 +1,86 @@
+# Pipeline de integracion continua (Entregable 3, seccion 4.1).
+# Cada push y cada pull request ejecutan las fitness functions; si una regla de
+# arquitectura se rompe, el pipeline queda en rojo y la rama no se debe integrar.
+name: CI · Fitness Functions
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gobernanza:
+    name: Gobernanza y calidad
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: apuntado
+          POSTGRES_USER: apuntado
+          POSTGRES_PASSWORD: apuntado
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U apuntado"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: "Fitness functions: aislamiento de capas, plug-ins y ciclos (ArchUnit)"
+        run: mvn -B test -Dtest='ArchitectureFitnessTest,MetricasArquitecturaTest'
+
+      - name: Pruebas unitarias y de integración (reglas, puntaje, cierre ACID, WebSocket)
+        run: mvn -B test -Dtest='!ArchitectureFitnessTest,!MetricasArquitecturaTest'
+
+      - name: "Complejidad ciclomática ≤ 10 y checklist de código (Checkstyle)"
+        run: mvn -B checkstyle:check
+
+      - name: Reportes de PMD (Ley de Deméter) y cobertura (JaCoCo)
+        run: mvn -B -DskipTests verify
+
+      - name: Complejidad por método (Lizard) y resumen de métricas
+        run: |
+          pip install --quiet lizard==1.26.0
+          python3 scripts/reporte_metricas.py
+
+      - name: Prueba de humo contra PostgreSQL real
+        env:
+          DATABASE_URL: jdbc:postgresql://localhost:5432/apuntado
+        run: |
+          java -jar target/apuntado.jar > target/servidor.log 2>&1 &
+          for i in $(seq 1 40); do
+            curl -sf http://localhost:8080/actuator/health && break
+            sleep 2
+          done
+          curl -sf http://localhost:8080/api/modalidades
+          curl -sf -X POST -H "Content-Type: application/json" \
+               -d '{"nombre":"CI","modalidad":"APUNTADO","jugadores":2,"umbral":101}' \
+               http://localhost:8080/api/salas
+
+      - name: Publicar reportes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-calidad
+          path: |
+            target/metricas/
+            target/site/jacoco/
+            target/surefire-reports/
+            target/checkstyle-result.xml
+            target/pmd.xml
+            target/servidor.log

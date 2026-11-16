@@ -1,0 +1,114 @@
+@startuml 1.2-secuencia-cierre
+' Entregable 3 - 1.2 Diagrama UML de secuencia: intento de cierre de ronda y liquidacion
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam monochrome true
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 260
+autonumber "<b>0."
+title Secuencia — Intento de cierre de ronda y liquidación de puntos
+
+actor "Jugador\n(navegador)" as UI
+participant "JuegoWebSocket\nHandler\n«presentation»" as WS
+participant "TurnOrchestrator\n«GameOrchestrator»" as TO
+participant "ColaPorPartida\n(hilo único\nde la mesa)" as COLA
+participant "CloseRequest" as CR
+participant "«interface»\nReglaJuego\n(plug-in)" as RJ
+participant "«interface»\nIEvaluadorCombinaciones\n«HandEvaluator»" as HE
+participant "CierreRonda\nTransaccional" as TX
+participant "«interface»\nIPuntuacion\n«ScoringService»" as SC
+participant "«interface»\nIHistorial" as HI
+database "PostgreSQL\n(Repository/DB)" as DB
+participant "HandVisibility →\nINotificadorEstado" as NV
+
+UI -> WS : {tipo: "CERRAR", carta: descarte, accionId}
+activate WS
+WS -> TO : solicitarCierre(credencial, descarte, accionId)
+activate TO
+TO -> COLA : ejecutar(codigo, tarea)
+activate COLA
+note right of COLA : 1.ª barrera: las acciones de una\nmesa se procesan de a una
+COLA -> CR : procesar(mesa, jugador, descarte)
+activate CR
+CR -> CR : exigirTurno(jugador, DESCARTAR)\nmanoSin(descarte) → Mano de 10 cartas
+CR -> RJ : validarCierre(mano)
+activate RJ
+
+alt Escenario 1 · modalidad CLASICA (ReglaClasicaCuartaTerna)
+  RJ -> HE : buscarDistribucion(mano, cuartas = 1, ternas = 2)
+  activate HE
+  HE --> RJ : Optional[1 cuarta + 2 ternas, 0 sueltas]
+  deactivate HE
+  RJ --> CR : ResultadoValidacion.ok(combinaciones)
+  CR -> RJ : penalizacionCerrador(mano)
+  RJ --> CR : 0  (quien cierra gana la ronda sin anotar)
+else Escenario 2 · modalidad APUNTADO (ReglaApuntado101)
+  RJ -> HE : buscarDistribucion(mano, cuartas = 0, ternas = 3)
+  activate HE
+  HE --> RJ : Optional[3 ternas + sobrantes]
+  deactivate HE
+  RJ -> RJ : puntosSueltos() < 5 ?
+  RJ --> CR : ResultadoValidacion.ok(combinaciones, sobrantes)
+  CR -> RJ : penalizacionCerrador(mano)
+  RJ --> CR : suma de sobrantes (0 a 4): quien cierra «apunta»
+else Cierre inválido (cualquier modalidad)
+  RJ --> CR : ResultadoValidacion.rechazo(condición incumplida)
+  CR -> HI : registrarEvento(CIERRE_RECHAZADO)
+  HI -> DB : INSERT evento_auditoria, turno_jugada
+  CR --> TO : ResultadoAccion.rechazo(condición)
+  TO --> WS : rechazo
+  WS --> UI : RESULTADO {aceptada: false, mensaje}\n(solo a quien lo intentó; la mano no se revela, RF-15)
+end
+deactivate RJ
+
+loop por cada jugador que no cerró
+  CR -> HE : evaluarCombinaciones(manoDelPerdedor)
+  activate HE
+  HE --> CR : mejor reparto → cartas sueltas y su suma
+  deactivate HE
+end
+
+CR -> TX : registrar(DatosCierre: ronda, cerrador, modalidad, penalizaciones)
+activate TX
+group Transacción ACID (@Transactional, READ COMMITTED)
+  TX -> DB : SELECT * FROM partida WHERE id = ? FOR UPDATE
+  note right : 2.ª barrera: bloqueo pesimista
+  TX -> DB : UPDATE ronda SET tipo_cierre, cerrador_id,\nversion = version + 1
+  note right : 3.ª barrera: @Version (optimista)
+  TX -> SC : liquidarRonda(partidaId, rondaId, penalizaciones)
+  activate SC
+  loop por cada jugador activo
+    SC -> DB : INSERT INTO puntaje_acumulado\n(ronda_id, jugador_id, penalizacion, acumulado)
+    note right : 4.ª barrera: la PK (ronda, jugador)\nimpide liquidar dos veces
+    SC -> SC : EvaluadorEliminacion:\nacumulado >= umbral (101) → eliminado
+  end
+  SC --> TX : ResultadoLiquidacion(marcador, eliminados)
+  deactivate SC
+  TX -> HI : registrarEvento(CIERRE_ACEPTADO), registrarEvento(JUGADOR_ELIMINADO)*
+  HI -> DB : INSERT evento_auditoria, turno_jugada
+  opt queda un solo jugador activo (RN-12)
+    TX -> DB : UPDATE partida SET estado = 'FINALIZADA', ganador_id = ?
+    TX -> HI : registrarEvento(PARTIDA_FINALIZADA)
+  end
+  DB --> TX : COMMIT
+end
+TX --> CR : ResultadoCierreRonda(liquidación, ganadorId)
+deactivate TX
+CR -> CR : descartarAlCerrar(descarte)\nmesa.terminarRonda(resumen, ganador)
+CR --> TO : ResultadoAccion.ok
+deactivate CR
+TO -> NV : difundir(mesa)
+activate NV
+NV -> UI : ESTADO {RONDA_TERMINADA o FINALIZADA,\nmano revelada del cerrador, penalizaciones} → a todos
+NV -> UI : MANO {cartas} → a cada jugador, solo la suya (RN-01)
+deactivate NV
+COLA --> TO : ResultadoAccion
+deactivate COLA
+TO --> WS : ResultadoAccion.ok
+deactivate TO
+WS --> UI : RESULTADO {aceptada: true, accionId}
+deactivate WS
+UI -> UI : mide latencia (envío → ESTADO con su accionId)\ny la reporta: {tipo: "LATENCIA", ms}
+@enduml

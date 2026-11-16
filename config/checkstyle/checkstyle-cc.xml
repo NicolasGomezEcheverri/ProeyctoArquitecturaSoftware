@@ -2,12 +2,30 @@
 <!DOCTYPE module PUBLIC
     "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
     "https://checkstyle.org/dtds/configuration_1_3.dtd">
-<!-- GG-09: complejidad ciclomatica maxima por metodo = 10 (Entregable 2, 5.3). -->
+<!--
+  GG-09: complejidad ciclomatica maxima por metodo = 10 (Entregable 2, 5.3).
+  En el Entregable 3 la regla se amplio de com.apuntado.rules a todo el codigo y se
+  agregaron dos puntos del Developer Code-Completion Checklist (Richards & Ford, cap. 24):
+  nada de System.out/printStackTrace de depuracion y ningun catch vacio.
+-->
 <module name="Checker">
   <property name="severity" value="error"/>
+
+  <module name="RegexpSingleline">
+    <property name="format" value="System\.(out|err)\.print|\.printStackTrace\(\)"/>
+    <property name="message" value="Checklist: quitar salidas de depuracion (usar el logger)"/>
+    <property name="fileExtensions" value="java"/>
+  </module>
+
   <module name="TreeWalker">
     <module name="CyclomaticComplexity">
       <property name="max" value="10"/>
+    </module>
+    <module name="EmptyCatchBlock">
+      <property name="exceptionVariableName" value="ignorada"/>
+    </module>
+    <module name="IllegalCatch">
+      <property name="illegalClassNames" value="Throwable, Error"/>
     </module>
   </module>
 </module>

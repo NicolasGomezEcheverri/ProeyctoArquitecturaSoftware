@@ -1,0 +1,44 @@
+# Configuracion por defecto: PostgreSQL (docker-compose, CI y despliegue).
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: apuntado
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://${DATABASE_HOST:localhost}:${DATABASE_PORT:5432}/${DATABASE_NAME:apuntado}}
+    username: ${DATABASE_USER:apuntado}
+    password: ${DATABASE_PASSWORD:apuntado}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  level:
+    auditoria: INFO
+    org.hibernate.SQL: WARN
+---
+# Perfil "local": base H2 en memoria, para jugar sin instalar PostgreSQL ni Docker.
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:h2:mem:apuntado;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""

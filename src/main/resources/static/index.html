@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Apuntado</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='5' y='3' width='22' height='26' rx='4' fill='%23fff' stroke='%231f6f4a' stroke-width='2'/%3E%3Ctext x='16' y='22' font-size='14' text-anchor='middle' fill='%23c0392b'%3E%E2%99%A5%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+  <header class="barra">
+    <button id="btnMenu" class="icono" type="button" aria-label="Abrir menú" title="Menú">☰</button>
+    <div class="marca">Apuntado</div>
+    <div id="infoMesa" class="info-mesa oculto"></div>
+    <div class="acciones-barra">
+      <span id="latencia" class="latencia oculto" title="Tiempo entre tu acción y ver la mesa actualizada">— ms</span>
+      <button id="btnAyuda" class="icono" type="button" aria-label="¿Cómo se juega?" title="¿Cómo se juega?">?</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Inicio -->
+    <section id="vistaInicio" class="vista vista-panel">
+      <div class="portada">
+        <div class="abanico-portada" aria-hidden="true"></div>
+        <h1>Apuntado</h1>
+        <p class="sub">Arma ternas y cuartas, cierra la ronda y no llegues al límite de puntos.</p>
+      </div>
+      <div class="dos-columnas">
+        <form id="formCrear" class="panel">
+          <h2>Crear una mesa</h2>
+          <label>Tu nombre <input name="nombre" maxlength="20" required autocomplete="nickname"></label>
+          <fieldset>
+            <legend>Modalidad</legend>
+            <div id="opcionesModalidad" class="opciones-modalidad"></div>
+          </fieldset>
+          <div class="fila">
+            <label>Jugadores
+              <select name="jugadores">
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4" selected>4</option>
+              </select>
+            </label>
+            <label>Pierde quien llegue a
+              <input name="umbral" type="number" min="20" max="500" value="101" required>
+            </label>
+          </div>
+          <button class="btn primario" type="submit">Crear mesa</button>
+        </form>
+
+        <form id="formUnirse" class="panel">
+          <h2>Unirme a una mesa</h2>
+          <label>Código de la mesa <input name="codigo" maxlength="5" required class="codigo-input" autocomplete="off"></label>
+          <label>Tu nombre <input name="nombre" maxlength="20" required autocomplete="nickname"></label>
+          <button class="btn" type="submit">Entrar</button>
+          <p class="nota">Para probar solo, abre otra ventana del navegador (por ejemplo en modo incógnito) y únete con el mismo código: cada ventana es un jugador.</p>
+        </form>
+      </div>
+    </section>
+
+    <!-- Sala de espera -->
+    <section id="vistaSala" class="vista vista-panel oculto">
+      <div class="panel sala">
+        <p class="sub">Comparte este código con los demás jugadores</p>
+        <div class="codigo-grande" id="salaCodigo">-----</div>
+        <button id="btnCopiar" class="btn-texto" type="button">Copiar enlace de invitación</button>
+        <p id="salaDetalle" class="sub"></p>
+        <ul id="salaJugadores" class="lista-jugadores"></ul>
+        <button id="btnEmpezar" class="btn primario oculto" type="button">Empezar ya</button>
+        <p class="nota">La partida empieza sola cuando se completa la mesa.</p>
+      </div>
+    </section>
+
+    <!-- Mesa de juego -->
+    <section id="vistaMesa" class="vista oculto">
+      <div id="mesa" class="mesa">
+        <div id="asientos"></div>
+
+        <div class="centro">
+          <button id="mazo" class="monton" type="button" aria-label="Robar del mazo">
+            <span class="pila">
+              <span class="carta dorso"></span><span class="carta dorso"></span><span class="carta dorso" id="mazoTope"></span>
+            </span>
+            <span class="contador" id="cartasMazo">0</span>
+          </button>
+          <button id="pozo" class="monton" type="button" aria-label="Tomar del pozo">
+            <span class="pila" id="pilaPozo"><span id="topePozo" class="carta vacia"></span></span>
+            <span class="contador" id="cartasPozo">0</span>
+          </button>
+        </div>
+        <div class="turno">
+          <div id="mensajeTurno" class="mensaje-turno"></div>
+          <div id="ultimoMovimiento" class="ultimo"></div>
+        </div>
+
+        <div id="zonaMia" class="zona-mia">
+          <div class="etiqueta-mia"><span id="miNombre"></span> <span id="misPuntos" class="sub"></span> <span id="cuentaMano" class="sub"></span></div>
+          <div id="mano" class="mano"></div>
+          <div class="botones-juego">
+            <button id="btnOrdenNumero" class="btn mini" type="button" title="Ordenar por número">1-2-3</button>
+            <button id="btnOrdenPalo" class="btn mini" type="button" title="Ordenar por palo">♠♥♦♣</button>
+            <button id="btnDescartar" class="btn" type="button" disabled>Descartar</button>
+            <button id="btnCerrar" class="btn primario" type="button" disabled>Cerrar ronda</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Menú lateral -->
+  <aside id="menu" class="menu" aria-hidden="true">
+    <div class="menu-cabecera"><b>Apuntado</b><button id="btnCerrarMenu" class="icono" type="button" aria-label="Cerrar menú">✕</button></div>
+    <section id="menuPartida" class="oculto">
+      <h3>Marcador</h3>
+      <table class="tabla"><tbody id="tablaMarcador"></tbody></table>
+      <h3>Regla de esta mesa</h3>
+      <p id="reglaActual" class="sub"></p>
+      <a id="lnkMetricasMenu" class="btn-texto" target="_blank" rel="noopener">Ver métricas de la partida</a>
+    </section>
+    <button id="btnAyudaMenu" class="btn" type="button">¿Cómo se juega?</button>
+    <button id="btnSalir" class="btn" type="button">Salir de la mesa</button>
+  </aside>
+
+  <!-- Resultado de la ronda -->
+  <dialog id="dlgRonda" class="dialogo">
+    <h2 id="rondaTitulo"></h2>
+    <div id="rondaCombinaciones" class="combinaciones"></div>
+    <table class="tabla">
+      <thead><tr><th>Jugador</th><th>Cartas sueltas</th><th>Suma</th><th>Total</th></tr></thead>
+      <tbody id="rondaTabla"></tbody>
+    </table>
+    <div class="botones-dialogo">
+      <a id="lnkMetricas" class="btn-texto oculto" target="_blank" rel="noopener">Ver métricas de la partida</a>
+      <button id="btnSiguiente" class="btn primario" type="button">Siguiente ronda</button>
+      <button id="btnNueva" class="btn primario oculto" type="button">Volver al inicio</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlgAyuda" class="dialogo">
+    <h2>¿Cómo se juega?</h2>
+    <ul class="ayuda">
+      <li>Cada jugador recibe 10 cartas; quien abre la ronda recibe 11 y empieza descartando.</li>
+      <li>En tu turno <b>robas</b> una carta (toca el mazo, o la carta de encima del pozo) y luego <b>descartas</b> una: arrástrala al pozo, o tócala y pulsa Descartar.</li>
+      <li>Una <b>terna</b> son 3 cartas y una <b>cuarta</b> son 4, del mismo número (7♠ 7♥ 7♦) o del mismo palo y seguidas (4♥ 5♥ 6♥). El As va antes del 2 o después de la K.</li>
+      <li><b>Clásica:</b> cierras con 1 cuarta y 2 ternas, y descartas la carta que te sobra.</li>
+      <li><b>Apuntado:</b> cierras con 3 ternas si lo que te sobra suma menos de 5 puntos. Esos puntos te los apuntas tú.</li>
+      <li>Para cerrar, toca la carta que vas a descartar y luego <b>Cerrar ronda</b>.</li>
+      <li>A los demás se les suman las cartas que no lograron combinar. Los números valen lo que dicen; J, Q, K y As valen 10.</li>
+      <li>Quien llegue al límite de puntos queda eliminado. Gana el último que siga en la mesa.</li>
+      <li>Puedes reordenar tu mano arrastrando las cartas dentro de ella o con los botones 1-2-3 y ♠♥♦♣.</li>
+    </ul>
+    <div class="botones-dialogo"><button class="btn primario" type="button" data-cerrar>Entendido</button></div>
+  </dialog>
+
+  <div id="avisos" class="avisos" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

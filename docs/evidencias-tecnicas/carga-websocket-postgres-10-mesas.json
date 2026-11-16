@@ -1,0 +1,21 @@
+{
+  "servidor": "http://localhost:8080",
+  "mesas": 10,
+  "acciones": 2570,
+  "promedio_ms": 22.7,
+  "p50_ms": 18.5,
+  "p95_ms": 52.3,
+  "max_ms": 124.8,
+  "partidas": [
+    "MPDZE",
+    "UFLZN",
+    "SUGPC",
+    "CPTFP",
+    "PAMGK",
+    "NNMVV",
+    "TVYJG",
+    "RJKCP",
+    "TKYLK",
+    "FJHUU"
+  ]
+}
